@@ -4,21 +4,22 @@
 [libxposed](https://github.com/libxposed) Modern API 102，纯 Java 实现，独立 APK，
 不需要改包、不需要 Xposed 旧 API。
 
-> 当前版本 **0.1.1**，目标应用 **虎扑 8.2.66.10232（versionCode 12320，真机已验证）**。
+> 当前版本 **0.1.3**，目标应用 **虎扑 8.2.69.11122 / 8.2.68.11062（versionCode 12326）**。
 > ⚠️ 本项目与虎扑官方无任何关联，仅供学习、研究和个人设备使用。
 > 使用前请阅读文末的[免责声明](#免责声明)。
 
 源码：<https://github.com/fengwenhua/quiethupu>
 
 工程骨架、开关/诊断/回传链路来自 [静盒 (QuietBox)](https://github.com/yigenhuobah/quietbox)
-（MIT）。Hook 目标按 8.2.65.10161 的运行时 DEX 编写，并在 8.2.66.10232 真机验证：
-30 个锚点全部解析成功，核心广告位均有命中。
+（MIT）。Hook 目标按 8.2.65.10161 的运行时 DEX 编写，已在 8.2.66 / 8.2.67 /
+8.2.68 真机验证；8.2.69.11122 已完成 32 个锚点的静态体检（与 8.2.68 同 versionCode，
+类名/签名一致）。
 
 ---
 
 ## 一、目标 App 的广告画像（为什么是这些开关）
 
-分析对象是 8.2.65.10161 的运行时 DEX（真机测试版本为 8.2.66.10232，全部锚点仍可解析；原 APK 被网易易盾 NIS 加固，壳内只有 30 个类；
+分析对象是 8.2.65.10161 的运行时 DEX（真机测试版本为 8.2.69.11122，全部锚点仍可解析；原 APK 被网易易盾 NIS 加固，壳内只有 30 个类；
 本仓库分析所用的 20 个真实 DEX 由 r0dump 从内存还原，见文末“分析来源”）。
 
 ### 1. 广告 SDK
@@ -79,6 +80,7 @@
 | AD-09 | 广告预加载断源 | 开 | `AdFeedPreLoadManager#requestAfterPm/#start/#startCommonRatePreRequest` |
 | AD-10 | 摇一摇跳转 | 开 | `HpFeedAd#initShake` |
 | AD-11 | 激励视频 / 短剧广告 | 开 | 游戏/短剧 `AdRewardVideoManager#load`、`Hp*Ad#loadRewardVideo`、`AdRewardVideo#show`；冷启动“看广告免广告”弹窗不弹 |
+| AD-12 | 插屏广告 | 开 | `HpInterstitialAdCore#loadFromNet` 不请求并回调 `loadFail`；`HpInterstitialAd#show` 兜底 |
 | UI-01 | 更新弹窗 | 开 | `UpdateViewModel#showUpdateDialog` 返回 `Unit` |
 | PV-01 | 剪贴板广告 | 开 | `AdClipBoardManager#configClipBoard` |
 
@@ -147,9 +149,12 @@ app/src/main/java/com/quiethupu/app/
 
 ## 四、适配与已知限制
 
-- **适配 8.2.66.10232（12320）**，已在真机验证：30 个锚点全部注册，
-  AD-01/02/03/04/05/06/07/08/10/11 均有命中，无 FATAL。AD-09/UI-01/PV-01
-  已注册，但本次测试场景没有触发；虎扑升级后若类名/签名变化，模块会按 `skip` 失败而不是崩溃。
+- **适配 8.2.69.11122（12326）**：32 个锚点静态体检全部存在。8.2.69 新增的
+  短剧奖励模板（Noah feed 奖励、浏览奖励、点击延迟奖励）仍走已有的激励视频
+  Manager 链路，由 AD-11 覆盖；没有新增独立广告模块。8.2.66 / 8.2.67 /
+  8.2.68 已完成真机运行验证（32 个锚点全部注册、0 skip、核心广告位命中，
+  无 FATAL）；8.2.69 与 8.2.68 同 versionCode，类名与签名一致。虎扑升级后若
+  类名/签名变化，模块会按 `skip` 失败而不是崩溃。
 - **NIS 加固的安装时机**：onPackageReady 时进程里只有壳类，真实 DEX 要等
   `MyApplication.attachBaseContext` 里的 `MyJni.load(...)` 之后才就绪。模块通过
   `DeferredInstall` 在壳 Application 的 `attachBaseContext/onCreate` 之后安装 hook，
@@ -170,7 +175,7 @@ app/src/main/java/com/quiethupu/app/
 
 ## 五、分析来源与参考项目
 
-- 分析 APK：`com.hupu.games` 8.2.65.10161（真机适配 8.2.66.10232），网易易盾 NIS 加固，签名证书 CN=Jerry Ching。
+- 分析 APK：`com.hupu.games` 8.2.65.10161（真机适配 8.2.69.11122），网易易盾 NIS 加固，签名证书 CN=Jerry Ching。
 - 分析材料：r0dump 运行时 DEX 转储（20 个应用 DEX，约 101.5MB），经 host-repair 修复后
   用 jadx 1.5.6 反编译。关键 DEX：`adver_boot/adver_base/adver_banner`（000016）、
   `adver_feed/adver_float/adver_popup/adver_dialog/adver_game`（000017）、
@@ -191,24 +196,55 @@ python3 tools/check-anchors.py <还原后的 DEX 目录>
 ```
 
 脚本只解析 DEX 方法表，不执行目标代码。2026-10-31 对 8.2.65.10161 的 20 个应用 DEX
-体检结果：**30 个锚点全部 OK，0 个必需锚点缺失**。
+体检结果：**32 个锚点全部 OK，0 个必需锚点缺失**。
 
 ---
 
-## 六、构建
+## 六、构建与发布
 
-工具链：AGP 9.4.1 + Gradle 9.7.1（wrapper）+ JDK 17 + compileSdk 37 / minSdk 29 / targetSdk 36。
+工具链：AGP 9.4.1 + Gradle 9.7.1（wrapper）+ JDK 17/21 + compileSdk 37 / minSdk 29 / targetSdk 36。
 `app/build.gradle` 强制 `androidx.recyclerview:recyclerview:1.4.0`，用于兼容本机离线缓存
 （material/preference 声明的 1.1.0 未缓存），有网环境同样适用。
 
+版本号集中在 `version.properties`（`versionCode` / `versionName`），本地与 CI 共用；
+也可用 `-PqhVersionCode=... -PqhVersionName=...` 临时覆盖。
+
+### 本地
+
 ```bash
-./gradlew :app:testDebugUnitTest :app:assembleDebug
-# 产物：app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+# debug 产物：app/build/outputs/apk/debug/app-debug.apk
+
+./gradlew :app:assembleRelease
+# release 产物：app/build/outputs/apk/release/app-release.apk
 ```
 
-本次提交已在本机验证：**76 个 JVM 单测通过，debug APK 构建成功（约 13.6 MB）**。
-release 读取仓库根目录 `keystore.properties`（不入库），缺失时 `assembleRelease` 直接失败，
-不会产出 debug 签名包。
+本地 release 从仓库根目录 `keystore.properties` 读取签名（该文件不入库），
+或使用环境变量 `KEYSTORE_FILE` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD`。
+两者都没有时 `assembleRelease` 直接失败，不会产出 debug 签名包。
+
+### CI / 签名
+
+- `.github/workflows/build.yml`：push / PR 自动跑单测、lint、debug 构建并上传 APK。
+- `.github/workflows/release.yml`：手动触发，输入已存在的 tag（如 `v0.1.3`），
+  在 `release` environment 中解码 `RELEASE_KEYSTORE_BASE64`，构建签名 release，
+  用 `release-trust.properties` 校验证书 SHA-256，然后发布 GitHub Release；
+  如果配置了 `MODULE_REPO_TOKEN`，会用 `[versionCode]-[versionName]` 作为 tag
+  同步到 Xposed-Modules-Repo。
+
+`release` environment 需要以下 secrets：
+
+```text
+RELEASE_KEYSTORE_BASE64    # base64(keystore)
+RELEASE_STORE_PASSWORD
+RELEASE_KEY_ALIAS          # quiethupu
+RELEASE_KEY_PASSWORD
+```
+
+可选 `MODULE_REPO_TOKEN`（对 Xposed-Modules-Repo 有写权限的 PAT）。
+签名密钥只保存在 GitHub Actions secrets，仓库与本地都不需要长期保存。
+
+本次验证：**76 个 JVM 单测通过，`lintDebug` 通过，debug/release 构建成功**。
 
 单测覆盖：Feature 编号/key/默认值、prefs.xml 与 Feature 一致性、Hooks 注册表完整性、
 Config 回退路径、HookState 并发计数与状态隔离、Report 诊断协议。
